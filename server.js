@@ -93,50 +93,64 @@ app.post("/casso-webhook", async (req, res) => {
   try {
     const signature = req.get("X-Casso-Signature") || "";
     const ok = verifyCassoSignature(req.rawBody, signature, process.env.CASSO_SECRET);
+
     if (!ok && process.env.NODE_ENV !== "development") {
       console.warn("❌ Invalid Casso Signature");
-      return res.json({ success: true });
+      return res.json({ success: true }); // vẫn trả success để tránh retry spam
     }
 
     const body = req.body;
-    if (body.error !== 0 || !body.data) return res.json({ success: true });
+    if (body.error !== 0 || !body.data) {
+      return res.json({ success: true });
+    }
 
     const tx = body.data;
     const desc = tx.description || "";
     console.log("📩 Webhook transaction:", JSON.stringify(tx, null, 2));
 
+    // Regex nhận cả MEOSTORE123456 và MEOSTORE-123456
     const match = desc.match(/MEOSTORE-?(\d+)/i);
-    if (match) {
-      const codeNormalized = `MEOSTORE-${match[1]}`;
-      const codeFromBank = match[0].toUpperCase();
-
-      const result = await ordersCollection.findOneAndUpdate(
-        { $or: [{ orderCode: codeNormalized }, { orderCode: codeFromBank }] },
-        { $set: { status: "Đã thanh toán", paidAt: new Date(), txId: tx.id, bankDescription: desc } }
-      );
-
-      if (result.value) {
-        console.log(`💰 Order ${result.value.orderCode} updated to PAID`);
-        // ⚡ Emit realtime event
-        io.emit("payment_success", {
-          orderCode: result.value.orderCode,
-          txId: tx.id,
-          amount: tx.amount,
-          desc
-        });
-      } else {
-        console.warn(`⚠️ Không tìm thấy đơn hàng ${codeNormalized} trong DB`);
-      }
-    } else {
+    if (!match) {
       console.warn("⚠️ Không tìm thấy orderCode trong description:", desc);
+      return res.json({ success: true });
+    }
+
+    const codeNormalized = `MEOSTORE-${match[1]}`;
+    const codeFromBank = match[0].toUpperCase();
+
+    const result = await ordersCollection.findOneAndUpdate(
+      { $or: [{ orderCode: codeNormalized }, { orderCode: codeFromBank }] },
+      {
+        $set: {
+          status: "Đã thanh toán",
+          paidAt: new Date(),
+          txId: tx.id,
+          bankDescription: desc,
+        },
+      },
+      { returnDocument: "after" } // ✅ luôn trả bản mới sau update
+    );
+
+    if (result) {
+      console.log(`💰 Order ${result.orderCode} updated to PAID`);
+      // ⚡ Emit realtime event cho frontend
+      io.emit("payment_success", {
+        orderCode: result.orderCode,
+        txId: tx.id,
+        amount: tx.amount,
+        desc,
+      });
+    } else {
+      console.warn(`⚠️ Không tìm thấy đơn hàng ${codeNormalized} (hoặc ${codeFromBank}) trong DB`);
     }
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Webhook error:", err.message);
-    res.json({ success: true });
+    console.error("❌ Webhook error:", err);
+    res.json({ success: true }); // vẫn trả success để tránh retry
   }
 });
+
 
 // ========== Xem trạng thái đơn hàng ==========
 app.get("/order/:orderCode", async (req, res) => {
@@ -154,3 +168,4 @@ app.get("/order/:orderCode", async (req, res) => {
 server.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
