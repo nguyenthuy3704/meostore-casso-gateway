@@ -130,42 +130,57 @@ app.post("/casso-webhook", async (req, res) => {
       process.env.CASSO_SECRET
     );
 
-    if (!ok) {
+    // ⚠️ Trong dev thì bỏ qua verify, prod thì check thật
+    if (!ok && process.env.NODE_ENV !== "development") {
       console.warn("❌ Invalid Casso Signature");
-      return res.status(200).json({ success: false, message: "Invalid signature" });
+      return res.json({ success: true }); // vẫn trả success để tránh Casso retry
     }
 
     const body = req.body;
     if (body.error !== 0 || !body.data) {
-      return res.status(200).json({ success: true });
+      return res.json({ success: true });
     }
 
     const tx = body.data;
     const desc = tx.description || "";
-    const match = desc.match(/MEOSTORE-(\d+)/i);
+
+    // Log toàn bộ giao dịch để dễ debug
+    console.log("📩 Webhook nhận được transaction:", JSON.stringify(tx, null, 2));
+
+    // Regex chấp nhận cả MEOSTORE-123456 và MEOSTORE123456
+    const match = desc.match(/MEOSTORE[-]?(\d+)/i);
 
     if (match) {
-      const orderCode = `MEOSTORE-${match[1]}`;
+      const orderCode = `MEOSTORE-${match[1]}`; // chuẩn hóa luôn có dấu gạch ngang
       const result = await ordersCollection.findOneAndUpdate(
         { orderCode },
-        { $set: { status: "Đã thanh toán", paidAt: new Date(), txId: tx.id } }
+        {
+          $set: {
+            status: "Đã thanh toán",
+            paidAt: new Date(),
+            txId: tx.id,
+            bankDescription: desc
+          },
+        }
       );
 
       if (result.value) {
         console.log(`💰 Order ${orderCode} updated to PAID`);
       } else {
-        console.warn(`⚠️ Không tìm thấy đơn hàng ${orderCode}`);
+        console.warn(`⚠️ Không tìm thấy đơn hàng ${orderCode} trong DB`);
       }
     } else {
       console.warn("⚠️ Không tìm thấy orderCode trong description:", desc);
     }
 
+    // Casso yêu cầu luôn trả success:true
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Webhook error:", err.message);
-    res.status(500).json({ success: false });
+    res.json({ success: true }); // tránh retry spam
   }
 });
+
 
 // ========== Xem trạng thái đơn hàng ==========
 app.get("/order/:orderCode", async (req, res) => {
@@ -185,6 +200,7 @@ app.get("/order/:orderCode", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
 
 
 
