@@ -130,10 +130,10 @@ app.post("/casso-webhook", async (req, res) => {
       process.env.CASSO_SECRET
     );
 
-    // ⚠️ Trong dev thì bỏ qua verify, prod thì check thật
+    // ⚠️ Dev thì bỏ qua verify, Prod thì check thật
     if (!ok && process.env.NODE_ENV !== "development") {
       console.warn("❌ Invalid Casso Signature");
-      return res.json({ success: true }); // vẫn trả success để tránh Casso retry
+      return res.json({ success: true }); // vẫn trả success để Casso không retry spam
     }
 
     const body = req.body;
@@ -144,30 +144,39 @@ app.post("/casso-webhook", async (req, res) => {
     const tx = body.data;
     const desc = tx.description || "";
 
-    // Log toàn bộ giao dịch để dễ debug
-    console.log("📩 Webhook nhận được transaction:", JSON.stringify(tx, null, 2));
+    // Log giao dịch chi tiết
+    console.log("📩 Webhook nhận transaction:", JSON.stringify(tx, null, 2));
 
-    // Regex chấp nhận cả MEOSTORE-123456 và MEOSTORE123456
-    const match = desc.match(/MEOSTORE[-]?(\d+)/i);
+    // Regex nhận cả MEOSTORE123456 và MEOSTORE-123456
+    const match = desc.match(/MEOSTORE-?(\d+)/i);
 
     if (match) {
-      const orderCode = `MEOSTORE-${match[1]}`; // chuẩn hóa luôn có dấu gạch ngang
+      // Chuẩn hoá orderCode thành MEOSTORE-xxxxxx
+      const codeNormalized = `MEOSTORE-${match[1]}`;
+      const codeFromBank = match[0].toUpperCase();
+
+      // Tìm theo cả 2 dạng: có gạch và không gạch
       const result = await ordersCollection.findOneAndUpdate(
-        { orderCode },
+        {
+          $or: [
+            { orderCode: codeNormalized },
+            { orderCode: codeFromBank },
+          ]
+        },
         {
           $set: {
             status: "Đã thanh toán",
             paidAt: new Date(),
             txId: tx.id,
-            bankDescription: desc
+            bankDescription: desc,
           },
         }
       );
 
       if (result.value) {
-        console.log(`💰 Order ${orderCode} updated to PAID`);
+        console.log(`💰 Order ${result.value.orderCode} updated to PAID`);
       } else {
-        console.warn(`⚠️ Không tìm thấy đơn hàng ${orderCode} trong DB`);
+        console.warn(`⚠️ Không tìm thấy đơn hàng với mã ${codeNormalized} (hoặc ${codeFromBank}) trong DB`);
       }
     } else {
       console.warn("⚠️ Không tìm thấy orderCode trong description:", desc);
@@ -177,7 +186,7 @@ app.post("/casso-webhook", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Webhook error:", err.message);
-    res.json({ success: true }); // tránh retry spam
+    res.json({ success: true }); // tránh retry liên tục
   }
 });
 
@@ -200,6 +209,7 @@ app.get("/order/:orderCode", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
 
 
 
