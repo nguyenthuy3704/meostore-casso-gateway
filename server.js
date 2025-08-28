@@ -51,38 +51,27 @@ app.use(
 );
 app.use(express.json());
 
-// ========== Tạo đơn hàng ==========
 app.post("/create-order", async (req, res) => {
-  try {
-    const { uid, amount } = req.body;
-    if (!uid || !amount) {
-      return res.status(400).json({ error: "Missing uid or amount" });
-    }
+  const { uid, amount } = req.body;
+  const orderCode = "MEOSTORE-" + Math.floor(100000 + Math.random() * 900000);
 
-    const orderCode =
-      "MEOSTORE-" + Math.floor(100000 + Math.random() * 900000);
+  const order = { orderCode, uid, amount, status: "Chờ thanh toán", createdAt: new Date() };
+  await ordersCollection.insertOne(order);
 
-    const order = {
-      orderCode,
-      uid,
-      amount,
-      status: "Chờ thanh toán",
-      createdAt: new Date(),
-    };
+  // Giả sử account info lấy từ Casso /accounts
+  const bankBin = "970448"; // OCB
+  const accountNo = "0014100027536007"; 
+  const accountName = "DONG THI THU HA";
 
-    await ordersCollection.insertOne(order);
+  const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accountNo}-compact2.png?amount=${amount}&addInfo=${orderCode}&accountName=${encodeURIComponent(accountName)}`;
 
-    res.json({
-      success: true,
-      orderCode,
-      transferDesc: `${orderCode} - Nạp UID ${uid}`,
-      amount,
-      note: "Khách hàng phải ghi đúng nội dung chuyển khoản",
-    });
-  } catch (err) {
-    console.error("❌ Create order error:", err.message);
-    res.status(500).json({ error: "Failed to create order" });
-  }
+  res.json({
+    success: true,
+    orderCode,
+    transferDesc: `${orderCode} - Nạp UID ${uid}`,
+    amount,
+    qrUrl
+  });
 });
 
 // ========== Verify chữ ký Webhook V2 ==========
@@ -179,4 +168,5 @@ app.get("/order/:orderCode", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
 
