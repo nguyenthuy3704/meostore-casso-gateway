@@ -8,6 +8,12 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+import cors from "cors";
+
+
+// Cho phép tất cả origin (dev/test)
+app.use(cors());
+
 // ========== MONGODB ==========
 const client = new MongoClient(process.env.MONGO_URI, {
   serverApi: {
@@ -173,3 +179,4 @@ app.get("/order/:orderCode", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
